@@ -4,7 +4,7 @@ Description: AWS X-Ray example - basic todo app
 
 Globals:
   Function:
-    Runtime: nodejs26.x
+    Runtime: nodejs24.x
     Architectures: [arm64]
     Timeout: 10
     MemorySize: 256
