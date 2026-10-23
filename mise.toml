@@ -1,5 +1,5 @@
 [tools]
-node = "22"
+node = "26"
 pnpm = "10"
 aws-sam = "latest"
 aws-cli = "2"
