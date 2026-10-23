@@ -23,6 +23,28 @@ Resources:
         Name: id
         Type: String
 
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
   TodosApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -60,3 +82,10 @@ Outputs:
   ApiUrl:
     Description: API Gateway base URL (put in packages/frontend/.env as VITE_API_URL)
     Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  FrontendBucketName:
+    Description: S3 bucket that holds the built frontend
+    Value: !Ref FrontendBucket
+  WebsiteUrl:
+    Description: Public URL of the frontend (S3 website endpoint, HTTP only)
+    Value: !GetAtt FrontendBucket.WebsiteURL

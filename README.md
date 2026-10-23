@@ -11,9 +11,10 @@ Todo app to learn AWS X-Ray. pnpm monorepo.
 ```sh
 pnpm install
 sam build -t infrastructure/template.yaml
-sam deploy --guided        # copy the ApiUrl output
+sam deploy                 # copy the ApiUrl output
 cp packages/frontend/.env.example packages/frontend/.env   # set VITE_API_URL
 pnpm dev:frontend
+pnpm deploy:frontend       # build and upload to S3, open the WebsiteUrl output
 ```
 
 ## See traces
