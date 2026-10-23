@@ -25,5 +25,5 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 ## Commands
 
 - `pnpm typecheck` — check both packages.
-- `sam build -t infrastructure/template.yaml && sam deploy` — build and deploy. The `ApiUrl` output goes in `packages/frontend/.env` as `VITE_API_URL`.
+- `pnpm deploy` — build, deploy the stack, write the `ApiUrl` output into `packages/frontend/.env` as `VITE_API_URL` (`scripts/deploy-frontend.sh`), build and upload the frontend. That script overwrites `.env`.
 - `pnpm dev:frontend` — run the frontend (start it yourself).
