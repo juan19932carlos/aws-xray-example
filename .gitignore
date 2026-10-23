@@ -151,3 +151,4 @@ vite.config.ts.timestamp-*
 # SAM
 .aws-sam
 samconfig.toml
+*.swp
