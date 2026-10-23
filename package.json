@@ -6,7 +6,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:frontend": "pnpm --filter frontend dev",
-    "sam:build": "sam build",
+    "sam:build": "sam build -t infrastructure/template.yaml",
     "sam:deploy": "sam deploy --guided"
   }
 }
