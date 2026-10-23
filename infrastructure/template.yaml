@@ -27,6 +27,7 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: Prod
+      OpenApiVersion: "3.0.1"
 
   TodosFunction:
     Type: AWS::Serverless::Function
@@ -34,6 +35,8 @@ Resources:
       BuildMethod: esbuild
       BuildProperties:
         Format: esm
+        OutExtension:
+          - .js=.mjs
         Target: es2022
         Sourcemap: true
         EntryPoints: [src/handler.ts]
