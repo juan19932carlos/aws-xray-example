@@ -1,0 +1,9 @@
+[tools]
+node = "22"
+pnpm = "10"
+aws-sam = "latest"
+aws-cli = "2"
+
+[env]
+AWS_PROFILE = "personal"
+AWS_REGION = "us-east-1"
