@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: AWS X-Ray example - basic todo app
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TodosTable
+  Api:
+    TracingEnabled: true
+
+Resources:
+  TodosTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  TodosFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: esm
+        Target: es2022
+        Sourcemap: true
+        EntryPoints: [src/handler.ts]
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+    Properties:
+      CodeUri: packages/backend
+      Handler: handler.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TodosTable
+      Events:
+        List:
+          Type: Api
+          Properties: { Path: /todos, Method: get }
+        Create:
+          Type: Api
+          Properties: { Path: /todos, Method: post }
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway base URL (put in packages/frontend/.env as VITE_API_URL)
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
