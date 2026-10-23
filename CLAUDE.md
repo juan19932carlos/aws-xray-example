@@ -4,7 +4,7 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 
 ## Layout
 
-- `infrastructure/template.yaml` — SAM template: DynamoDB table (`id` string key), REST API, one Lambda, tracing on.
+- `infrastructure/template.yaml` — SAM template: DynamoDB table (`id` string key), REST API, one Lambda, tracing on, public S3 bucket with website hosting for the frontend.
 - `packages/backend/src/handler.ts` — single Lambda. `GET /todos` scans, `POST /todos` puts. Needs `title` in the body.
 - `packages/frontend` — Vite + vanilla TypeScript. Reads the API base URL from `VITE_API_URL`.
 
@@ -25,5 +25,5 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 ## Commands
 
 - `pnpm typecheck` — check both packages.
-- `sam build -t infrastructure/template.yaml && sam deploy --guided` — build and deploy. The `ApiUrl` output goes in `packages/frontend/.env` as `VITE_API_URL`.
+- `sam build -t infrastructure/template.yaml && sam deploy` — build and deploy. The `ApiUrl` output goes in `packages/frontend/.env` as `VITE_API_URL`.
 - `pnpm dev:frontend` — run the frontend (start it yourself).
