@@ -7,7 +7,8 @@
     "typecheck": "pnpm -r typecheck",
     "dev:frontend": "pnpm --filter frontend dev",
     "sam:build": "sam build -t infrastructure/template.yaml",
-    "sam:deploy": "sam deploy",
-    "deploy:frontend": "pnpm --filter frontend build && aws s3 sync packages/frontend/dist s3://$(aws cloudformation describe-stacks --stack-name xray-example-app --query \"Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue\" --output text) --delete"
+    "sam:deploy": "sam deploy --no-fail-on-empty-changeset",
+    "deploy:frontend": "bash scripts/deploy-frontend.sh",
+    "deploy": "pnpm sam:build && pnpm sam:deploy && pnpm deploy:frontend"
   }
 }
