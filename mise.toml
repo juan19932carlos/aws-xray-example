@@ -1,8 +1,9 @@
 [tools]
-node = "26"
+node = "24"
 pnpm = "10"
 aws-sam = "latest"
 aws-cli = "2"
+"npm:esbuild" = "0.25"
 
 [env]
 AWS_PROFILE = "personal"
