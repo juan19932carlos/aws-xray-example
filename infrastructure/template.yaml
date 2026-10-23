@@ -23,6 +23,11 @@ Resources:
         Name: id
         Type: String
 
+  TodosApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+
   TodosFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -43,12 +48,12 @@ Resources:
       Events:
         List:
           Type: Api
-          Properties: { Path: /todos, Method: get }
+          Properties: { RestApiId: !Ref TodosApi, Path: /todos, Method: get }
         Create:
           Type: Api
-          Properties: { Path: /todos, Method: post }
+          Properties: { RestApiId: !Ref TodosApi, Path: /todos, Method: post }
 
 Outputs:
   ApiUrl:
     Description: API Gateway base URL (put in packages/frontend/.env as VITE_API_URL)
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
