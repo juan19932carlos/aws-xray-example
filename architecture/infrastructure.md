@@ -19,12 +19,15 @@ flowchart LR
     Lambda[Lambda<br/>nodejs24.x arm64]
     DDB[(DynamoDB<br/>TodosTable)]
     EC2[EC2 t4g.nano<br/>Node app + X-Ray daemon]
+    Alb[ALB]
+    Ecs[ECS Fargate task<br/>Node app + X-Ray SDK, no daemon yet]
     XRay[[AWS X-Ray]]
 
     Browser -->|loads page, HTTP| S3
     Browser -->|HTTPS| Api
     Api -->|GET, POST /todos| Lambda --> DDB
     Api -->|GET /, DELETE /todos/id<br/>HTTP proxy to the Elastic IP| EC2
+    Api -->|PATCH /todos/id<br/>HTTP proxy to the ALB| Alb --> Ecs --> DDB
     EC2 --> DDB
 
     Api -.traces.-> XRay
@@ -37,13 +40,19 @@ flowchart LR
 | Logical ID | Type | Purpose |
 | --- | --- | --- |
 | `FrontendBucket`, `FrontendBucketPolicy` | S3 bucket | Serves the built frontend. Public, HTTP only. |
-| `TodosApi` | API Gateway REST API | The only API. `GET` and `POST /todos` go to the Lambda. `GET /` and `DELETE /todos/{id}` go to EC2. Has CORS and tracing. |
+| `TodosApi` | API Gateway REST API | The only API. `GET` and `POST /todos` go to the Lambda. `GET /` and `DELETE /todos/{id}` go to EC2. `PATCH /todos/{id}` goes to the ALB. Has CORS and tracing. |
 | `TodosFunction` | Lambda | One handler for `GET` and `POST /todos`. |
 | `TodosTable` | DynamoDB | Stores todos, key `id`. |
 | `WebServerInstance`, `WebServerSecurityGroup` | EC2 + security group | Runs `apps/ec2` as the `todos-ec2` systemd service, with the X-Ray daemon. Port 80 open to the world, port 22 for `SshCidr`. |
 | `WebServerEip`, `WebServerEipAssociation` | Elastic IP | A fixed address for the instance. The API integration URL uses it. |
 | `WebServerRole`, `WebServerProfile` | IAM role | `AWSXRayDaemonWriteAccess`, `AmazonSSMManagedInstanceCore`, `DeleteItem` on the table, `GetObject` on the artifacts bucket. |
 | `AppArtifactsBucket` | S3 bucket | Private. Holds `ec2-app.tgz`. |
+| `EcsRepository` | ECR repository | Holds the `apps/ecs-todos` image. Emptied when the stack is deleted. |
+| `EcsCluster`, `EcsService`, `EcsTaskDefinition` | ECS Fargate | One container (`todos`, port 8080, arm64). The app uses the X-Ray SDK. No daemon sidecar yet. The service starts with 0 tasks. `scripts/deploy-ecs.sh` sets it to 1. |
+| `EcsAlb`, `EcsListener`, `EcsTargetGroup` | Application Load Balancer | The fixed address for the tasks. Health check on `/health`. |
+| `EcsAlbSecurityGroup`, `EcsTaskSecurityGroup` | Security groups | ALB: port 80 from the world. Tasks: port 8080 from the ALB only. |
+| `EcsExecutionRole`, `EcsTaskRole` | IAM roles | Execution: pull image, write logs. Task: `UpdateItem` on the table. No X-Ray policy yet. |
+| `EcsLogGroup` | CloudWatch log group | Container logs, 7 days. |
 
 ## One API Gateway
 
@@ -57,6 +66,12 @@ All routes live in the `DefinitionBody` of `TodosApi`.
 
 - **Todos path:** client, `TodosApi` stage, Lambda, DynamoDB. The Lambda is instrumented with `aws-xray-sdk-core`, so DynamoDB shows as a subsegment.
 - **EC2 path:** the same `TodosApi` stage, then the EC2 node. API Gateway records a remote subsegment for the HTTP backend, and X-Ray infers a node from it (one per URL). The app on EC2 also sends its own segment through the daemon, and DynamoDB shows as a subsegment, because the role has `AWSXRayDaemonWriteAccess`. One node per URL: `/` and each `/todos/<id>` are separate inferred nodes. See `journal/0002-ec2-inferred-node-and-apps-layout.md`.
+
+- **ECS path:** `PATCH /todos/{id}`. The app uses the X-Ray SDK, but the task has no daemon sidecar and the task role has no X-Ray policy. Expected: API Gateway segment and one inferred ALB node, nothing else, because the app's segments have nowhere to go. See `journal/0003-ecs-fargate-update.md`.
+
+## Deploying the ECS app
+
+`scripts/deploy-ecs.sh`, the last step of `pnpm deploy`. It logs in to ECR, builds `apps/ecs-todos` for arm64, pushes `:latest`, and sets the service to 1 task with a new deployment. Set `VpcId` and `SubnetIds` in `samconfig.toml` first (at least two subnets in different zones, with internet access, because tasks pull the image over a public IP).
 
 ## Deploying the EC2 app
 
