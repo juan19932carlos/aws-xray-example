@@ -7,6 +7,12 @@ Parameters:
     Type: String
     Description: CIDR allowed to SSH into the web server, for example 203.0.113.5/32. Set it in samconfig.toml.
     AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(3[0-2]|[12]?\d)$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for the load balancer and the Fargate tasks. Use the default VPC. Set it in samconfig.toml.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two subnets in different availability zones, with a route to the internet. Set it in samconfig.toml.
 
 Globals:
   Function:
@@ -177,10 +183,149 @@ Resources:
       InstanceId: !Ref WebServerInstance
       AllocationId: !GetAtt WebServerEip.AllocationId
 
+  # Fargate: the Update feature. PATCH /todos/{id} goes API Gateway -> ALB -> container.
+  # Fargate gives every task a new IP, so the ALB is the fixed address API Gateway calls.
+  EcsRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    Properties:
+      EmptyOnDelete: true
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+
+  EcsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  EcsAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP from anywhere to the ECS load balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+
+  EcsTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Container port, only from the load balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !GetAtt EcsAlbSecurityGroup.GroupId }
+
+  EcsAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets: !Ref SubnetIds
+      SecurityGroups: [!GetAtt EcsAlbSecurityGroup.GroupId]
+
+  EcsTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 8080
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 15
+      HealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "10" }
+
+  EcsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref EcsAlb
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - { Type: forward, TargetGroupArn: !Ref EcsTargetGroup }
+
+  # Pulls the image from ECR and writes container logs. Not the app's role.
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # The app's role. UpdateItem only. No X-Ray policy on purpose: see journal 03.
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: todos-table-update
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:UpdateItem
+                Resource: !GetAtt TodosTable.Arn
+
+  # One container, no X-Ray daemon sidecar. The SDK in the app has nowhere to send. Add it when the trace is fixed.
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: xray-example-todos
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: todos
+          Image: !Sub "${EcsRepository.RepositoryUri}:latest"
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+          Environment:
+            - { Name: TABLE_NAME, Value: !Ref TodosTable }
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EcsLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: todos
+
+  # DesiredCount is 0 because the repository is empty on the first deploy.
+  # scripts/deploy-ecs.sh pushes the image and sets it to 1.
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: EcsListener
+    Properties:
+      Cluster: !Ref EcsCluster
+      LaunchType: FARGATE
+      DesiredCount: 0
+      TaskDefinition: !Ref EcsTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups: [!GetAtt EcsTaskSecurityGroup.GroupId]
+      LoadBalancers:
+        - { ContainerName: todos, ContainerPort: 8080, TargetGroupArn: !Ref EcsTargetGroup }
+
   # One API for everything. With an explicit DefinitionBody, SAM adds the CORS
   # OPTIONS routes and the Lambda permissions, but not the integrations: every
   # route declares its own. GET and POST /todos go to the Lambda. GET / and
-  # DELETE /todos/{id} go to the instance.
+  # DELETE /todos/{id} go to the instance. PATCH /todos/{id} goes to the ALB.
   TodosApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -189,7 +334,7 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type'"
-        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        AllowMethods: "'GET,POST,PATCH,DELETE,OPTIONS'"
       DefinitionBody:
         openapi: "3.0.1"
         info:
@@ -224,6 +369,18 @@ Resources:
                 type: http_proxy
                 httpMethod: DELETE
                 uri: !Sub "http://${WebServerEip}/todos/{id}"
+                requestParameters:
+                  integration.request.path.id: method.request.path.id
+            patch:
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema: { type: string }
+              x-amazon-apigateway-integration:
+                type: http_proxy
+                httpMethod: PATCH
+                uri: !Sub "http://${EcsAlb.DNSName}/todos/{id}"
                 requestParameters:
                   integration.request.path.id: method.request.path.id
 
@@ -273,3 +430,12 @@ Outputs:
   WebServerInstanceId:
     Description: EC2 instance id (used by scripts/deploy-ec2.sh)
     Value: !Ref WebServerInstance
+  EcsRepositoryUri:
+    Description: ECR repository for the ECS app image (used by scripts/deploy-ecs.sh)
+    Value: !GetAtt EcsRepository.RepositoryUri
+  EcsClusterName:
+    Description: ECS cluster name (used by scripts/deploy-ecs.sh)
+    Value: !Ref EcsCluster
+  EcsServiceName:
+    Description: ECS service name (used by scripts/deploy-ecs.sh)
+    Value: !GetAtt EcsService.Name
