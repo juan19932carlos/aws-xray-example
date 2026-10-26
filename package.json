@@ -10,6 +10,7 @@
     "sam:build": "sam build -t infrastructure/template.yaml",
     "sam:deploy": "sam deploy --no-fail-on-empty-changeset",
     "deploy:frontend": "bash scripts/deploy-frontend.sh",
-    "deploy": "pnpm sam:build && pnpm sam:deploy && pnpm deploy:frontend"
+    "deploy:ec2": "bash scripts/deploy-ec2.sh",
+    "deploy": "pnpm sam:build && pnpm sam:deploy && pnpm deploy:frontend && pnpm deploy:ec2"
   }
 }

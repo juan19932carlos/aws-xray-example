@@ -5,7 +5,8 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
 
 // Wrapping the client makes every DynamoDB call show up as a subsegment in X-Ray.
-const ddb = DynamoDBDocumentClient.from(AWSXRay.captureAWSv3Client(new DynamoDBClient({})));
+const rawddb = new DynamoDBClient({});
+const ddb = DynamoDBDocumentClient.from(AWSXRay.captureAWSv3Client(rawddb));
 const TABLE = process.env.TABLE_NAME;
 
 const app = express();
