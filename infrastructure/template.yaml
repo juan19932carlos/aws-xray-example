@@ -140,7 +140,7 @@ Resources:
         Banner:
           - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
     Properties:
-      CodeUri: ../packages/backend
+      CodeUri: ../apps/lambda-todos
       Handler: handler.handler
       Policies:
         - DynamoDBCrudPolicy:
@@ -155,7 +155,7 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Description: API Gateway base URL (put in packages/frontend/.env as VITE_API_URL)
+    Description: API Gateway base URL (put in apps/frontend/.env as VITE_API_URL)
     Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   FrontendBucketName:
     Description: S3 bucket that holds the built frontend
