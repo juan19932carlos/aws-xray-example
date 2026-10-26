@@ -17,6 +17,8 @@ pnpm dev:frontend    # local dev, uses the .env written by deploy
 pnpm dev:docs        # docs site (ADRs and journal)
 ```
 
+The docs site is published to GitHub Pages on every push to `main`: https://juan19932carlos.github.io/aws-xray-example/
+
 ## See traces
 
 AWS Console → CloudWatch → X-Ray traces → Trace map.

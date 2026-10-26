@@ -9,6 +9,7 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 - `apps/` — every application. Layout and dependency rules are in `.claude/rules/repo-layout.md`.
 - `apps/frontend` — Vite + vanilla TypeScript. Reads the API base URLs from `VITE_API_URL` (todos API) and `VITE_WEB_API_URL` (EC2 API).
 - `apps/docs` — Docusaurus site (docs-only, Mermaid on). The docs plugin reads `architecture/` directly (`path: '../../architecture'`); `architecture/infrastructure.md` is excluded. Markdown is parsed with `format: 'detect'`, so `.md` is plain CommonMark.
+- `.github/workflows/docs.yml` — builds `apps/docs` and deploys it to GitHub Pages on every push to `main`. The site lives at `/aws-xray-example/` (`baseUrl`), so `trailingSlash` is `false` and assets must not use root-absolute paths.
 - `apps/ec2` — Node + Express app run by hand on the EC2 instance (not deployed by SAM). `DELETE /todos/:id`, wrapped with the X-Ray SDK.
 
 ## Tooling
