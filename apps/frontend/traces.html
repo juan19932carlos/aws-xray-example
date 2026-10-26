@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Traces</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.4 system-ui, sans-serif; color: #1f2933; }
+      .layout { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+      aside { border-right: 1px solid #d9dee3; }
+      h1, h2 { margin: 0; padding: 12px 16px; font-size: 14px; background: #1f2933; color: #fff; }
+      aside nav a { display: block; padding: 8px 16px; color: inherit; }
+      #services { margin: 0; padding: 0; list-style: none; }
+      #services button { display: block; width: 100%; padding: 10px 16px; border: 0; border-bottom: 1px solid #d9dee3; background: #fff; text-align: left; font: inherit; cursor: pointer; }
+      #services button[aria-current="true"] { background: #eef0f2; font-weight: 600; }
+      #services .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #services .meta { display: block; color: #6b7785; font-size: 12px; font-weight: 400; }
+      main { min-width: 0; }
+      .toolbar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #d9dee3; }
+      #content { padding: 16px; }
+      #error { margin: 0; padding: 0 16px; color: #b42318; }
+      .trace { margin-bottom: 16px; border: 1px solid #d9dee3; }
+      .trace > header { padding: 8px 12px; background: #eef0f2; border-bottom: 1px solid #d9dee3; }
+      .trace > header .id { color: #6b7785; font: 12px ui-monospace, monospace; }
+      .segment { padding: 12px; border-bottom: 1px solid #d9dee3; }
+      .segment:last-child { border-bottom: 0; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 8px; }
+      dt { color: #6b7785; }
+      dd { margin: 0; overflow-wrap: anywhere; }
+      details { margin-left: 12px; border-left: 1px solid #d9dee3; padding-left: 8px; }
+      details > summary { cursor: pointer; padding: 2px 0; }
+      .leaf { margin: 2px 0 2px 12px; padding-left: 8px; border-left: 1px solid #d9dee3; }
+      .bad { font-weight: 600; }
+      .muted { color: #6b7785; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside>
+        <h1>Services</h1>
+        <nav><a href="/index.html">← Todos</a></nav>
+        <ul id="services"></ul>
+      </aside>
+      <main>
+        <h2 id="title">Select a service</h2>
+        <div class="toolbar">
+          <label>
+            Last
+            <select id="minutes">
+              <option value="15">15 minutes</option>
+              <option value="60" selected>1 hour</option>
+              <option value="360">6 hours</option>
+            </select>
+          </label>
+          <span class="muted">Newest 10 traces that touched the service</span>
+        </div>
+        <p id="error" role="alert"></p>
+        <div id="content"></div>
+      </main>
+    </div>
+    <script type="module" src="/src/traces.ts"></script>
+  </body>
+</html>

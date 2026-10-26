@@ -382,6 +382,18 @@ Resources:
                 type: aws_proxy
                 httpMethod: POST
                 uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TodosFunction.Arn}/invocations"
+          /traces:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TracesFunction.Arn}/invocations"
+          /traces/services:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TracesFunction.Arn}/invocations"
           /todos/{id}:
             delete:
               parameters:
@@ -435,9 +447,44 @@ Resources:
           Type: Api
           Properties: { RestApiId: !Ref TodosApi, Path: /todos, Method: post }
 
+  # Reads traces back from X-Ray for the viewer page in the frontend.
+  TracesFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        Target: es2022
+        Sourcemap: true
+        EntryPoints: [src/handler.ts]
+        Banner:
+          - js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+    Properties:
+      CodeUri: ../apps/lambda-traces
+      Handler: handler.handler
+      Timeout: 20
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - xray:GetServiceGraph
+                - xray:GetTraceSummaries
+                - xray:BatchGetTraces
+              Resource: "*"
+      Events:
+        Services:
+          Type: Api
+          Properties: { RestApiId: !Ref TodosApi, Path: /traces/services, Method: get }
+        Traces:
+          Type: Api
+          Properties: { RestApiId: !Ref TodosApi, Path: /traces, Method: get }
+
 Outputs:
   ApiUrl:
-    Description: API Gateway base URL. /todos goes to the Lambda, DELETE /todos/{id} and / go to EC2. Put it in apps/frontend/.env as VITE_API_URL
+    Description: API Gateway base URL. /todos and /traces go to Lambdas, DELETE /todos/{id} and / go to EC2. Put it in apps/frontend/.env as VITE_API_URL
     Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   FrontendBucketName:
     Description: S3 bucket that holds the built frontend
