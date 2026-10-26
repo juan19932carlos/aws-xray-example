@@ -5,12 +5,16 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 
 // Wrapping the client makes every DynamoDB call show up as a subsegment in X-Ray.
-// The SDK sends to a daemon on 127.0.0.1:2000. The task has no daemon sidecar yet,
-// so the segments are dropped. That is the next fix.
+// The SDK sends to the daemon sidecar on 127.0.0.1:2000. The task role has no X-Ray policy yet,
+// so the daemon cannot forward them. That is the next fix.
 const ddb = DynamoDBDocumentClient.from(AWSXRay.captureAWSv3Client(new DynamoDBClient({})));
 const TABLE = process.env.TABLE_NAME;
 
 const app = express();
+
+// Declared before openSegment on purpose: the ALB calls this every few seconds per container,
+// and it must not create a trace each time.
+app.get("/health", (req, res) => res.sendStatus(200));
 
 // openSegment reads the X-Amzn-Trace-Id header from API Gateway and makes one segment per request.
 app.use(xrayExpress.openSegment("xray-example-ecs"));
@@ -26,9 +30,6 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
-
-// The load balancer calls this to know the container is alive.
-app.get("/health", (req, res) => res.sendStatus(200));
 
 app.patch("/todos/:id", async (req, res, next) => {
   const { title, done } = req.body ?? {};

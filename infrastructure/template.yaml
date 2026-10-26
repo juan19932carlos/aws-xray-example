@@ -257,7 +257,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  # The app's role. UpdateItem only. No X-Ray policy on purpose: see journal 03.
+  # The app's role, also used by the daemon sidecar in the same task.
   EcsTaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -266,6 +266,9 @@ Resources:
           - Effect: Allow
             Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Lets the daemon sidecar send segments (xray:PutTraceSegments).
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
       Policies:
         - PolicyName: todos-table-update
           PolicyDocument:
@@ -274,7 +277,8 @@ Resources:
                 Action: dynamodb:UpdateItem
                 Resource: !GetAtt TodosTable.Arn
 
-  # One container, no X-Ray daemon sidecar. The SDK in the app has nowhere to send. Add it when the trace is fixed.
+  # Two containers in one task. They share the network, so the app reaches the daemon on 127.0.0.1:2000.
+  # The daemon needs xray:PutTraceSegments: EcsTaskRole has AWSXRayDaemonWriteAccess.
   EcsTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -303,6 +307,26 @@ Resources:
               awslogs-group: !Ref EcsLogGroup
               awslogs-region: !Ref "AWS::Region"
               awslogs-stream-prefix: todos
+        # Sidecar: receives segments from the app on UDP 2000 and sends them to X-Ray.
+        # -o is local mode: do not call the EC2 metadata service, which does not exist on Fargate.
+        # Not essential: a daemon crash must not stop the todos container.
+        - Name: xray-daemon
+          Image: public.ecr.aws/xray/aws-xray-daemon:latest
+          Essential: false
+          Cpu: 32
+          MemoryReservation: 64
+          Command: ["-o"]
+          PortMappings:
+            - ContainerPort: 2000
+              Protocol: udp
+          Environment:
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EcsLogGroup
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: xray-daemon
 
   # DesiredCount is 0 because the repository is empty on the first deploy.
   # scripts/deploy-ecs.sh pushes the image and sets it to 1.
