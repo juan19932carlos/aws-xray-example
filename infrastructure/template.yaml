@@ -164,70 +164,23 @@ Resources:
           systemctl daemon-reload
           systemctl enable --now todos-ec2
 
-  WebApi:
-    Type: AWS::ApiGateway::RestApi
+  # A fixed address for the instance. API Gateway needs a URL that does not change
+  # when the instance is replaced, because the deployment is not redone for it.
+  WebServerEip:
+    Type: AWS::EC2::EIP
     Properties:
-      Name: xray-example-web
+      Domain: vpc
 
-  WebRootMethod:
-    Type: AWS::ApiGateway::Method
+  WebServerEipAssociation:
+    Type: AWS::EC2::EIPAssociation
     Properties:
-      RestApiId: !Ref WebApi
-      ResourceId: !GetAtt WebApi.RootResourceId
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        Type: HTTP_PROXY
-        IntegrationHttpMethod: GET
-        Uri: !Sub "http://${WebServerInstance.PublicDnsName}/"
+      InstanceId: !Ref WebServerInstance
+      AllocationId: !GetAtt WebServerEip.AllocationId
 
-  WebTodosResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref WebApi
-      ParentId: !GetAtt WebApi.RootResourceId
-      PathPart: todos
-
-  WebTodoIdResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref WebApi
-      ParentId: !Ref WebTodosResource
-      PathPart: "{id}"
-
-  # ANY covers DELETE and the browser's OPTIONS preflight. The EC2 app answers both.
-  WebTodoIdMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref WebApi
-      ResourceId: !Ref WebTodoIdResource
-      HttpMethod: ANY
-      AuthorizationType: NONE
-      RequestParameters:
-        method.request.path.id: true
-      Integration:
-        Type: HTTP_PROXY
-        IntegrationHttpMethod: ANY
-        Uri: !Sub "http://${WebServerInstance.PublicDnsName}/todos/{id}"
-        RequestParameters:
-          integration.request.path.id: method.request.path.id
-
-  # A raw Deployment is not redeployed when methods change. Rename this ID
-  # (V2, V3, ...) to force a new deployment.
-  WebDeploymentV3:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: [WebRootMethod, WebTodoIdMethod]
-    Properties:
-      RestApiId: !Ref WebApi
-
-  WebStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      RestApiId: !Ref WebApi
-      DeploymentId: !Ref WebDeploymentV3
-      StageName: Prod
-      TracingEnabled: true
-
+  # One API for everything. With an explicit DefinitionBody, SAM adds the CORS
+  # OPTIONS routes and the Lambda permissions, but not the integrations: every
+  # route declares its own. GET and POST /todos go to the Lambda. GET / and
+  # DELETE /todos/{id} go to the instance.
   TodosApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -236,7 +189,43 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowHeaders: "'Content-Type'"
-        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: xray-example-app
+          version: "1.0"
+        paths:
+          /:
+            get:
+              x-amazon-apigateway-integration:
+                type: http_proxy
+                httpMethod: GET
+                uri: !Sub "http://${WebServerEip}/"
+          /todos:
+            get:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TodosFunction.Arn}/invocations"
+            post:
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${TodosFunction.Arn}/invocations"
+          /todos/{id}:
+            delete:
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema: { type: string }
+              x-amazon-apigateway-integration:
+                type: http_proxy
+                httpMethod: DELETE
+                uri: !Sub "http://${WebServerEip}/todos/{id}"
+                requestParameters:
+                  integration.request.path.id: method.request.path.id
 
   TodosFunction:
     Type: AWS::Serverless::Function
@@ -267,7 +256,7 @@ Resources:
 
 Outputs:
   ApiUrl:
-    Description: API Gateway base URL (put in apps/frontend/.env as VITE_API_URL)
+    Description: API Gateway base URL. /todos goes to the Lambda, DELETE /todos/{id} and / go to EC2. Put it in apps/frontend/.env as VITE_API_URL
     Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   FrontendBucketName:
     Description: S3 bucket that holds the built frontend
@@ -275,9 +264,6 @@ Outputs:
   WebsiteUrl:
     Description: Public URL of the frontend (S3 website endpoint, HTTP only)
     Value: !GetAtt FrontendBucket.WebsiteURL
-  WebUrl:
-    Description: Apache landing page on EC2, through its own API Gateway (a second URL)
-    Value: !Sub "https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
   TableName:
     Description: DynamoDB table name. The EC2 app reads it from TABLE_NAME.
     Value: !Ref TodosTable

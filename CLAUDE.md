@@ -4,10 +4,10 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 
 ## Layout
 
-- `infrastructure/template.yaml` — SAM template: DynamoDB table (`id` string key), REST API, one Lambda, tracing on, public S3 bucket with website hosting for the frontend.
+- `infrastructure/template.yaml` — SAM template: DynamoDB table (`id` string key), one REST API, one Lambda, one EC2 instance, tracing on, public S3 bucket with website hosting for the frontend.
 - `apps/lambda-todos/src/handler.ts` — the todos Lambda. `GET /todos` scans, `POST /todos` puts. Needs `title` in the body.
 - `apps/` — every application. Layout and dependency rules are in `.claude/rules/repo-layout.md`.
-- `apps/frontend` — Vite + vanilla TypeScript. Reads the API base URLs from `VITE_API_URL` (todos API) and `VITE_WEB_API_URL` (EC2 API).
+- `apps/frontend` — Vite + vanilla TypeScript. Reads the API base URL from `VITE_API_URL`.
 - `apps/docs` — Docusaurus site (docs-only, Mermaid on). The docs plugin reads `architecture/` directly (`path: '../../architecture'`); `architecture/infrastructure.md` is excluded. Markdown is parsed with `format: 'detect'`, so `.md` is plain CommonMark.
 - `.github/workflows/docs.yml` — builds `apps/docs` and deploys it to GitHub Pages on every push to `main`. The site lives at `/aws-xray-example/` (`baseUrl`), so `trailingSlash` is `false` and assets must not use root-absolute paths.
 - `apps/ec2` — Node + Express app on the EC2 instance. `DELETE /todos/:id`, wrapped with the X-Ray SDK. SAM does not ship it: `scripts/deploy-ec2.sh` uploads it to the artifacts bucket and the instance pulls it (systemd service `todos-ec2`).
@@ -24,14 +24,14 @@ Repo-wide rules are in `.claude/rules/`: layout, commits, journal, architecture 
 - X-Ray: every AWS SDK client in the Lambda must be wrapped with `AWSXRay.captureAWSv3Client`. An unwrapped client gives no subsegment in the trace.
 - `Tracing: Active` (Lambda) and `TracingEnabled: true` (API) live in `infrastructure/template.yaml` under `Globals`. Keep them there.
 - The Lambda is bundled by SAM with esbuild (`Metadata` in `infrastructure/template.yaml`). `CodeUri` is `../apps/lambda-todos` (relative to the template), `EntryPoints` is `src/handler.ts`. Each Lambda has its own `CodeUri`.
-- CORS is set twice. `TodosApi` has `Cors` (the `OPTIONS` preflight). The handler adds `Access-Control-Allow-Origin` to every response, because a Lambda proxy passes its reply as is. Add the header to every new response.
-
-- `UserData` of the EC2 instance runs only on first boot. A change to it needs a new logical ID for the instance. A raw `AWS::ApiGateway::Deployment` is not redeployed when methods or URIs change. Rename it (`WebDeploymentV3`, `V4`, ...).
+- CORS: `TodosApi` has `Cors` (the `OPTIONS` preflight, answered by the gateway). The Lambda and the EC2 app add `Access-Control-Allow-Origin` to every response, because a proxy integration passes the reply as is. Add the header to every new response.
+- `UserData` of the EC2 instance runs only on first boot. A change to it needs a new logical ID for the instance.
+- `TodosApi` has an explicit `DefinitionBody`: every route declares its own `x-amazon-apigateway-integration`. A new Lambda route needs its path and integration there. EC2 routes use the Elastic IP, never the instance DNS name.
 
 ## Commands
 
 - `pnpm typecheck` — check all apps.
-- `pnpm deploy` — build, deploy the stack, write the `ApiUrl` and `WebUrl` outputs into `apps/frontend/.env` as `VITE_API_URL` and `VITE_WEB_API_URL` (`scripts/deploy-frontend.sh`), build and upload the frontend. That script overwrites `.env`.
+- `pnpm deploy` — build, deploy the stack, write the `ApiUrl` output into `apps/frontend/.env` as `VITE_API_URL` (`scripts/deploy-frontend.sh`), build and upload the frontend. That script overwrites `.env`.
 - `pnpm deploy:ec2` — upload `apps/ec2` and restart the service. Part of `pnpm deploy`.
 - `pnpm dev:frontend` — run the frontend (start it yourself).
 - `pnpm dev:docs` — run the docs site (start it yourself).
