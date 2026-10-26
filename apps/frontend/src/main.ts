@@ -1,6 +1,6 @@
 const API = import.meta.env.VITE_API_URL as string;
 
-type Todo = { id: string; title: string; createdAt: string };
+type Todo = { id: string; title: string; createdAt: string; done?: boolean };
 
 const form = document.querySelector<HTMLFormElement>("#form")!;
 const input = document.querySelector<HTMLInputElement>("#title")!;
@@ -14,13 +14,30 @@ async function load() {
   todos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   list.replaceChildren(
     ...todos.map((t) => {
-      const li = Object.assign(document.createElement("li"), { textContent: t.title });
+      const li = Object.assign(document.createElement("li"), { textContent: t.done ? `✓ ${t.title}` : t.title });
+      const toggle = Object.assign(document.createElement("button"), { textContent: t.done ? "Undo" : "Done" });
+      toggle.addEventListener("click", () => update(t.id, !t.done));
       const del = Object.assign(document.createElement("button"), { textContent: "Delete" });
       del.addEventListener("click", () => remove(t.id));
-      li.append(" ", del);
+      li.append(" ", toggle, " ", del);
       return li;
     }),
   );
+}
+
+async function update(id: string, done: boolean) {
+  error.textContent = "";
+  try {
+    const res = await fetch(`${API}/todos/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ done }),
+    });
+    if (!res.ok) throw new Error(`PATCH /todos/${id} failed: ${res.status}`);
+    await load();
+  } catch (err) {
+    error.textContent = (err as Error).message;
+  }
 }
 
 async function remove(id: string) {
