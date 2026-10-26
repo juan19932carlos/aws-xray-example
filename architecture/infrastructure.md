@@ -13,6 +13,7 @@ flowchart LR
     subgraph Backends
         direction TB
         Lambda["Lambda<br/>GET, POST /todos"]
+        Traces["Lambda<br/>GET /traces, reads X-Ray"]
         EC2["EC2<br/>DELETE /todos/id"]
         Ecs["ECS Fargate, behind an ALB<br/>PATCH /todos/id"]
     end
@@ -22,6 +23,7 @@ flowchart LR
     Browser --> S3
     Browser --> Api
     Api --> Lambda
+    Api --> Traces
     Api --> EC2
     Api --> Ecs
     Lambda --> DDB
@@ -36,16 +38,17 @@ flowchart LR
 | `FrontendBucket`, `FrontendBucketPolicy` | S3 bucket | Serves the built frontend. Public, HTTP only. |
 | `TodosApi` | API Gateway REST API | The only API. `GET` and `POST /todos` go to the Lambda. `GET /` and `DELETE /todos/{id}` go to EC2. `PATCH /todos/{id}` goes to the ALB. Has CORS and tracing. |
 | `TodosFunction` | Lambda | One handler for `GET` and `POST /todos`. |
+| `TracesFunction` | Lambda | Reads traces back from X-Ray for the viewer page: `GET /traces/services` (the nodes of the service graph) and `GET /traces?name=&type=&minutes=` (the newest 10 traces of one node, with their segments and subsegments). Role: `xray:GetServiceGraph`, `GetTraceSummaries`, `BatchGetTraces`. |
 | `TodosTable` | DynamoDB | Stores todos, key `id`. |
 | `WebServerInstance`, `WebServerSecurityGroup` | EC2 + security group | Runs `apps/ec2` as the `todos-ec2` systemd service, with the X-Ray daemon. Port 80 open to the world, port 22 for `SshCidr`. |
 | `WebServerEip`, `WebServerEipAssociation` | Elastic IP | A fixed address for the instance. The API integration URL uses it. |
 | `WebServerRole`, `WebServerProfile` | IAM role | `AWSXRayDaemonWriteAccess`, `AmazonSSMManagedInstanceCore`, `DeleteItem` on the table, `GetObject` on the artifacts bucket. |
 | `AppArtifactsBucket` | S3 bucket | Private. Holds `ec2-app.tgz`. |
 | `EcsRepository` | ECR repository | Holds the `apps/ecs-todos` image. Emptied when the stack is deleted. |
-| `EcsCluster`, `EcsService`, `EcsTaskDefinition` | ECS Fargate | One container (`todos`, port 8080, arm64). The app uses the X-Ray SDK. No daemon sidecar yet. The service starts with 0 tasks. `scripts/deploy-ecs.sh` sets it to 1. |
+| `EcsCluster`, `EcsService`, `EcsTaskDefinition` | ECS Fargate | Two containers: `todos` (port 8080, arm64, X-Ray SDK) and the `xray-daemon` sidecar (UDP 2000). The service starts with 0 tasks. `scripts/deploy-ecs.sh` sets it to 1. |
 | `EcsAlb`, `EcsListener`, `EcsTargetGroup` | Application Load Balancer | The fixed address for the tasks. Health check on `/health`. |
 | `EcsAlbSecurityGroup`, `EcsTaskSecurityGroup` | Security groups | ALB: port 80 from the world. Tasks: port 8080 from the ALB only. |
-| `EcsExecutionRole`, `EcsTaskRole` | IAM roles | Execution: pull image, write logs. Task: `UpdateItem` on the table. No X-Ray policy yet. |
+| `EcsExecutionRole`, `EcsTaskRole` | IAM roles | Execution: pull image, write logs. Task: `UpdateItem` on the table and `AWSXRayDaemonWriteAccess`. |
 | `EcsLogGroup` | CloudWatch log group | Container logs, 7 days. |
 
 ## ECS in detail
@@ -63,10 +66,12 @@ flowchart LR
         Tg["Target Group<br/>health check /health"]
         subgraph Task ["Fargate task, sg: 8080 from the ALB only"]
             App["Container todos :8080<br/>apps/ecs-todos"]
+            Daemon["Container xray-daemon<br/>UDP 2000, same network"]
         end
     end
 
     Api --> Alb --> Tg --> App
+    App -.segments.-> Daemon
 
     Service["ECS Service<br/>keeps 1 task running"] -.starts.-> Task
     TaskDef["Task Definition<br/>image, CPU, memory, roles"] -.describes.-> Service
@@ -94,9 +99,17 @@ sequenceDiagram
 | Role | Who assumes it | What it allows | Where it applies |
 | --- | --- | --- | --- |
 | `EcsExecutionRole` | ECS itself (the Fargate agent), not your code | Pull from ECR, write to CloudWatch Logs | Starting the task and shipping its logs. Your code never sees it. |
-| `EcsTaskRole` | Your code, through the AWS SDK | `dynamodb:UpdateItem` on `TodosTable` | Calls made from inside the container. This is where `AWSXRayDaemonWriteAccess` goes later. |
+| `EcsTaskRole` | Your code, through the AWS SDK | `dynamodb:UpdateItem` on `TodosTable` | Calls made from inside the container. This is also where `AWSXRayDaemonWriteAccess` lives, because the daemon runs inside the task. |
 
 Rule of thumb: the execution role gets the container running. The task role is what the app can do once it runs.
+
+## Trace viewer
+
+A second page of the frontend, `traces.html` (linked from the todos page). Sidebar: the nodes of the service graph. Main area: the newest traces that touched the selected node, each with the node's segment and an accordion of its subsegments.
+
+- `TracesFunction` calls the X-Ray API. A node is a `(name, type)` pair. Type is empty for a segment with no origin, and `remote` for an inferred node.
+- A `remote` node has no segment of its own, so the viewer shows the subsegment that the caller wrote.
+- The function wraps its X-Ray client like every other client, so its own reads appear in the service map.
 
 ## One API Gateway
 
@@ -111,7 +124,10 @@ All routes live in the `DefinitionBody` of `TodosApi`.
 - **Todos path:** client, `TodosApi` stage, Lambda, DynamoDB. The Lambda is instrumented with `aws-xray-sdk-core`, so DynamoDB shows as a subsegment.
 - **EC2 path:** the same `TodosApi` stage, then the EC2 node. API Gateway records a remote subsegment for the HTTP backend, and X-Ray infers a node from it (one per URL). The app on EC2 also sends its own segment through the daemon, and DynamoDB shows as a subsegment, because the role has `AWSXRayDaemonWriteAccess`. One node per URL: `/` and each `/todos/<id>` are separate inferred nodes. See `journal/0002-ec2-inferred-node-and-apps-layout.md`.
 
-- **ECS path:** `PATCH /todos/{id}`. The app uses the X-Ray SDK, but the task has no daemon sidecar and the task role has no X-Ray policy. Expected: API Gateway segment and one inferred ALB node, nothing else, because the app's segments have nowhere to go. See `journal/0003-ecs-fargate-update.md`.
+- **ECS path:** `PATCH /todos/{id}`. The app uses the X-Ray SDK, the task has the daemon sidecar, and the task role has `AWSXRayDaemonWriteAccess`. Result: one `xray-example-ecs` node with an arrow to DynamoDB, replacing the Remote nodes. The `/health` route is declared before `openSegment`, so the ALB health check is not traced. See `journal/0003-ecs-fargate-update.md`.
+- **Trace viewer:** `TracesFunction` calls the X-Ray API with a wrapped client, so it shows as its own Lambda pair with an arrow to an `XRay` node.
+
+![Final service map: Client, API Gateway stage, two Lambda pairs (todos and traces), the ECS node and DynamoDB, with the traces Lambda calling X-Ray](journal/img/service-map-final.png)
 
 ## Deploying the ECS app
 
