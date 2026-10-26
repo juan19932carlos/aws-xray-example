@@ -58,13 +58,43 @@ Rule: a caller records "I called X". X-Ray draws X as an inferred node. X draws 
 * **Result:** ⚠️ *With warnings*. The build passes locally with the new `baseUrl`, and `pnpm install --frozen-lockfile` passes. The workflow has not run on GitHub, because it triggers only on `main` and this branch is not merged.
 * **Finding / Technical note:** A project page is served under `/<repo>/`, so `baseUrl` must match or every asset path breaks. The workflow uses the official Pages flow (`upload-pages-artifact`, then `deploy-pages`) with `pages: write` and `id-token: write`. `pnpm/action-setup` reads the pnpm version from the root `packageManager` field. One manual step: Settings, Pages, Source = GitHub Actions.
 
+## 10. Segment: One API Gateway
+* **Action:** Removed the second API (`WebApi` and its resources). `TodosApi` now has an explicit `DefinitionBody`: `GET` and `POST /todos` go to the Lambda, `GET /` and `DELETE /todos/{id}` go to the EC2 instance. Added an Elastic IP for the instance. The frontend lost `VITE_WEB_API_URL` and uses only `VITE_API_URL`.
+* **Result:** ⚠️ *With warnings*. `sam validate --lint` passes, and the translated template (`sam validate --debug`) has every route with its integration, the CORS `OPTIONS` routes, and both Lambda permissions. Not deployed yet.
+* **Finding / Technical note:** With an inline `DefinitionBody`, SAM does not add the integrations from the function events. A first attempt translated with **no Lambda integration at all** and no error, so the translated output is worth reading. Each route must declare its own `x-amazon-apigateway-integration` (`aws_proxy` with the function ARN for the Lambda, `http_proxy` for EC2). The EC2 routes use the Elastic IP, because a stage keeps its old deployment when only an instance URL changes. This also ends the `WebDeploymentV3` rename trick.
+
+## 11. Segment: The full trace, end to end
+* **Action:** After `pnpm deploy`, clicked Delete in the frontend and read the raw trace (`1-6adedd89-2c82620f7dd708644b32adc9`).
+* **Result:** ✅ *Worked*. The EC2 app now sends its own segment, so the EC2 node is real, not inferred.
+* **Finding / Technical note:** The trace has four pieces, all in one trace id, in one API.
+  1. `xray-example-app/Prod` (API Gateway stage) holds a `remote` subsegment named after the Elastic IP URL, `http://18.211.122.110/todos/<id>`.
+  2. `xray-example-ec2` is a real segment from the Express SDK (`aws-xray-sdk-core 3.12.0`, Node 24). Its `parent_id` is the id of that remote subsegment. The `X-Amzn-Trace-Id` header from API Gateway is what links them.
+  3. Under it, a `DynamoDB` subsegment (`DeleteItem`, status 200, `retries: 1`) from the wrapped client.
+  4. A `DynamoDB` segment with `inferred: true` and `origin: AWS::DynamoDB::Table`. X-Ray built it from that subsegment, as in segment 2, but now for the table.
+
+```mermaid
+flowchart LR
+    Client([Client]) --> Stage["xray-example-app/Prod<br/>API Gateway, 125 ms"]
+    Stage --> Sub["remote subsegment<br/>http://ELASTIC_IP/todos/id"]
+    Sub -- parent_id --> Ec2["xray-example-ec2<br/>real segment, 114 ms"]
+    Ec2 --> Ddb["DynamoDB subsegment<br/>DeleteItem, 66 ms"]
+    Ddb -. X-Ray infers .-> Table["DynamoDB table node<br/>inferred: true"]
+```
+
+Compare with segment 2: before, the EC2 node was only the inferred shadow of the remote subsegment, with no details. Now the segment carries its own URL, status `204`, runtime, and the DynamoDB call. The role with `AWSXRayDaemonWriteAccess` and the daemon on `127.0.0.1:2000` made the difference. Total time is 126 ms.
+
+## 12. Segment: Docusaurus moved into `architecture/`
+* **Action:** Moved the docs site from `apps/docs` to `architecture/site`, because it supports the architecture and is not an app. Replaced the single docs plugin (which read all of `architecture/`) with two instances: one for `architecture/decisions` and one for `architecture/journal`. Decisions and Journal are now links on the right of the header. Removed `sidebars.ts`. Updated the workspace list, `.gitignore`, the Pages workflow path, `README.md`, `CLAUDE.md`, and `.claude/rules/repo-layout.md`.
+* **Result:** ⚠️ *With warnings*. `pnpm --filter docs build` passes, and the built page has both links on the right. Not opened in a browser, so the look is unchecked.
+* **Finding / Technical note:** A second docs instance needs `@docusaurus/plugin-content-docs` as its own dependency. pnpm does not let the site import it through the preset. Each instance gets its own sidebar, built from its folder. No new ADR: the stack is the same, only the location of the site changed.
+
 ---
 
 ## 📌 Summary and Next Steps
-* **Key achievements:** EC2 appears in the map as an inferred node, and the cause is understood. SSH and the daemon work. `DELETE /todos/:id` works on EC2. The repo has a clear layout and written rules.
+* **Key achievements:** EC2 first appeared as an inferred node, and the cause is understood. It now sends real segments, with the DynamoDB call under it. SSH and the daemon work. `DELETE /todos/:id` works on EC2, through one API Gateway. The repo has a clear layout and written rules.
 * **Technical debt or pending items for tomorrow:**
-  * Run `pnpm deploy` and check that the new instance serves the app and sends segments (`tail /var/log/xray/xray.log`). Look for the real EC2 node and the DynamoDB subsegment in X-Ray.
-  * Find the one fault on the `xray-example-web/Prod` node (`fault = true`).
-  * Open the docs site with `pnpm dev:docs` and check the Mermaid diagrams.
+  * Find out why the DynamoDB call shows `retries: 1`.
+  * Optional: add `AWSXRay.config([AWSXRay.plugins.EC2Plugin])` so the EC2 segment gets `origin: AWS::EC2::Instance`.
+  * Next focus: ECS on Fargate behind the same API (for example `PUT /todos/{id}`), with the X-Ray daemon as a sidecar container. Watch the cost: the task and the load balancer bill by the hour. SQS is skipped for now, because it behaves like the DynamoDB node.
+  * Open the docs site with `pnpm dev:docs` and check the Mermaid diagrams and the header links.
   * Set Pages to GitHub Actions in the repo settings, merge to `main`, and check that the workflow publishes the site.
-  * Automate the EC2 app deploy (`UserData` or S3).
