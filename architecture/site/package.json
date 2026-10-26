@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@docusaurus/core": "catalog:",
+    "@docusaurus/plugin-content-docs": "catalog:",
     "@docusaurus/preset-classic": "catalog:",
     "@docusaurus/theme-mermaid": "catalog:",
     "@mermaid-js/layout-elk": "catalog:",

@@ -5,6 +5,7 @@
 - A new Lambda is a new `apps/lambda-<name>` folder with the same structure as `apps/lambda-todos`, its own `CodeUri`, and its own `AWS::Serverless::Function` in `infrastructure/template.yaml`.
 - Other apps: `apps/ec2`, `apps/frontend`.
 - Infrastructure code lives in `infrastructure/`. Scripts live in `scripts/`.
+- The Docusaurus site is not an app. It lives in `architecture/site` and is a pnpm workspace package (`pnpm-workspace.yaml` lists it).
 
 ## Dependency versions
 

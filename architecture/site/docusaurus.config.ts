@@ -22,10 +22,8 @@ const config: Config = {
       'classic',
       {
         docs: {
-          path: '../../architecture',
-          exclude: ['infrastructure.md'],
-          routeBasePath: '/',
-          sidebarPath: './sidebars.ts',
+          path: '../decisions',
+          routeBasePath: 'decisions',
         },
         blog: false,
         theme: {},
@@ -33,8 +31,25 @@ const config: Config = {
     ],
   ],
 
+  plugins: [
+    [
+      '@docusaurus/plugin-content-docs',
+      {
+        id: 'journal',
+        path: '../journal',
+        routeBasePath: 'journal',
+      },
+    ],
+  ],
+
   themeConfig: {
-    navbar: { title: 'AWS X-Ray example' },
+    navbar: {
+      title: 'AWS X-Ray example',
+      items: [
+        { to: '/decisions/tech-stack', label: 'Decisions', position: 'right', activeBaseRegex: '/decisions' },
+        { to: '/journal/first-configuration', label: 'Journal', position: 'right', activeBaseRegex: '/journal' },
+      ],
+    },
     footer: { style: 'light' },
   } satisfies Preset.ThemeConfig,
 };
