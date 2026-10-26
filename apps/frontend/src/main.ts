@@ -14,24 +14,45 @@ async function load() {
   todos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   list.replaceChildren(
     ...todos.map((t) => {
-      const li = Object.assign(document.createElement("li"), { textContent: t.done ? `✓ ${t.title}` : t.title });
+      const li = document.createElement("li");
+      const text = Object.assign(document.createElement("span"), {
+        textContent: t.done ? `✓ ${t.title}` : t.title,
+        title: "Click to edit",
+      });
+      text.style.cursor = "text";
+      text.addEventListener("click", () => edit(t, text));
       const toggle = Object.assign(document.createElement("button"), { textContent: t.done ? "Undo" : "Done" });
-      toggle.addEventListener("click", () => update(t.id, !t.done));
+      toggle.addEventListener("click", () => update(t.id, { done: !t.done }));
       const del = Object.assign(document.createElement("button"), { textContent: "Delete" });
       del.addEventListener("click", () => remove(t.id));
-      li.append(" ", toggle, " ", del);
+      li.append(text, " ", toggle, " ", del);
       return li;
     }),
   );
 }
 
-async function update(id: string, done: boolean) {
+// Click on the title: swap the text for an input. Enter saves, Escape or leaving the field cancels.
+function edit(todo: Todo, text: HTMLSpanElement) {
+  const field = Object.assign(document.createElement("input"), { value: todo.title });
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && field.value.trim() && field.value.trim() !== todo.title) {
+      update(todo.id, { title: field.value });
+    } else if (e.key === "Enter" || e.key === "Escape") {
+      field.replaceWith(text);
+    }
+  });
+  field.addEventListener("blur", () => field.replaceWith(text));
+  text.replaceWith(field);
+  field.focus();
+}
+
+async function update(id: string, patch: { title?: string; done?: boolean }) {
   error.textContent = "";
   try {
     const res = await fetch(`${API}/todos/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ done }),
+      body: JSON.stringify(patch),
     });
     if (!res.ok) throw new Error(`PATCH /todos/${id} failed: ${res.status}`);
     await load();
