@@ -6,6 +6,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev:frontend": "pnpm --filter frontend dev",
+    "dev:docs": "pnpm --filter docs start",
     "sam:build": "sam build -t infrastructure/template.yaml",
     "sam:deploy": "sam deploy --no-fail-on-empty-changeset",
     "deploy:frontend": "bash scripts/deploy-frontend.sh",
