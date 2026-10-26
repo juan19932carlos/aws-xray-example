@@ -1,4 +1,5 @@
 const API = import.meta.env.VITE_API_URL as string;
+const WEB_API = import.meta.env.VITE_WEB_API_URL as string;
 
 type Todo = { id: string; title: string; createdAt: string };
 
@@ -13,8 +14,25 @@ async function load() {
   const todos: Todo[] = await res.json();
   todos.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   list.replaceChildren(
-    ...todos.map((t) => Object.assign(document.createElement("li"), { textContent: t.title })),
+    ...todos.map((t) => {
+      const li = Object.assign(document.createElement("li"), { textContent: t.title });
+      const del = Object.assign(document.createElement("button"), { textContent: "Delete" });
+      del.addEventListener("click", () => remove(t.id));
+      li.append(" ", del);
+      return li;
+    }),
   );
+}
+
+async function remove(id: string) {
+  error.textContent = "";
+  try {
+    const res = await fetch(`${WEB_API}/todos/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`DELETE /todos/${id} failed: ${res.status}`);
+    await load();
+  } catch (err) {
+    error.textContent = (err as Error).message;
+  }
 }
 
 form.addEventListener("submit", async (e) => {

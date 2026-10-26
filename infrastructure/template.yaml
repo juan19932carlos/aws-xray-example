@@ -65,12 +65,34 @@ Resources:
           ToPort: 22
           CidrIp: !Ref SshCidr
 
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: todos-table-delete
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:DeleteItem
+                Resource: !GetAtt TodosTable.Arn
+
+  WebServerProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref WebServerRole]
+
   WebServerHost:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t4g.nano
       ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
       SecurityGroupIds: [!GetAtt WebServerSecurityGroup.GroupId]
+      IamInstanceProfile: !Ref WebServerProfile
       Tags:
         - { Key: Name, Value: xray-example-web }
       UserData:
@@ -102,9 +124,42 @@ Resources:
         IntegrationHttpMethod: GET
         Uri: !Sub "http://${WebServerHost.PublicDnsName}/"
 
-  WebDeployment:
+  WebTodosResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebApi
+      ParentId: !GetAtt WebApi.RootResourceId
+      PathPart: todos
+
+  WebTodoIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebApi
+      ParentId: !Ref WebTodosResource
+      PathPart: "{id}"
+
+  # ANY covers DELETE and the browser's OPTIONS preflight. The EC2 app answers both.
+  WebTodoIdMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebApi
+      ResourceId: !Ref WebTodoIdResource
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.id: true
+      Integration:
+        Type: HTTP_PROXY
+        IntegrationHttpMethod: ANY
+        Uri: !Sub "http://${WebServerHost.PublicDnsName}/todos/{id}"
+        RequestParameters:
+          integration.request.path.id: method.request.path.id
+
+  # A raw Deployment is not redeployed when methods change. Rename this ID
+  # (V2, V3, ...) to force a new deployment.
+  WebDeploymentV2:
     Type: AWS::ApiGateway::Deployment
-    DependsOn: WebRootMethod
+    DependsOn: [WebRootMethod, WebTodoIdMethod]
     Properties:
       RestApiId: !Ref WebApi
 
@@ -112,7 +167,7 @@ Resources:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref WebApi
-      DeploymentId: !Ref WebDeployment
+      DeploymentId: !Ref WebDeploymentV2
       StageName: Prod
       TracingEnabled: true
 
@@ -166,3 +221,6 @@ Outputs:
   WebUrl:
     Description: Apache landing page on EC2, through its own API Gateway (a second URL)
     Value: !Sub "https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  TableName:
+    Description: DynamoDB table name. The EC2 app reads it from TABLE_NAME.
+    Value: !Ref TodosTable

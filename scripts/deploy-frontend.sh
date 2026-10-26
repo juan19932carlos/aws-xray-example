@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reads the stack outputs, writes the API URL into apps/frontend/.env,
+# Reads the stack outputs, writes both API URLs into apps/frontend/.env,
 # then builds the frontend and uploads it to the S3 bucket.
 set -euo pipefail
 
@@ -11,9 +11,10 @@ output() {
 }
 
 API_URL=$(output ApiUrl)
+WEB_API_URL=$(output WebUrl)
 BUCKET=$(output FrontendBucketName)
 
-echo "VITE_API_URL=$API_URL" > apps/frontend/.env
+printf "VITE_API_URL=%s\nVITE_WEB_API_URL=%s\n" "$API_URL" "$WEB_API_URL" > apps/frontend/.env
 
 pnpm --filter frontend build
 aws s3 sync apps/frontend/dist "s3://$BUCKET" --delete

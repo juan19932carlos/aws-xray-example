@@ -63,6 +63,17 @@ The alternative is one API with a `/ec2` route. It gives one URL and one node.
 - **Todos path:** client, `TodosApi` stage, Lambda, DynamoDB. The Lambda is instrumented with `aws-xray-sdk-core`, so DynamoDB shows as a subsegment.
 - **Web path:** client, `WebApi` stage, and an inferred EC2 node. Apache sends no traces. API Gateway records a remote subsegment for the HTTP backend, and X-Ray infers the node from it. See `journal/0002-inferred-node-discovery.md`.
 
+## Deploying the EC2 app
+
+By hand. SAM and `pnpm deploy` do not touch the instance.
+
+1. Connect: `aws ec2-instance-connect ssh --instance-id <id>` (port 22 is open for `SshCidr` only).
+2. Put `apps/ec2/package.json` and `apps/ec2/server.js` in `~/app`.
+3. Run `npm install`.
+4. Start it: `sudo TABLE_NAME=<TableName output> AWS_REGION=us-east-1 node server.js`. Port 80 needs root.
+
+The instance has the X-Ray daemon installed by hand and an IAM role from the template. The app is not a service, so it stops when the SSH session ends.
+
 ## Deploy
 
 ```mermaid
