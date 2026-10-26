@@ -1,5 +1,4 @@
 const API = import.meta.env.VITE_API_URL as string;
-const WEB_API = import.meta.env.VITE_WEB_API_URL as string;
 
 type Todo = { id: string; title: string; createdAt: string };
 
@@ -27,7 +26,7 @@ async function load() {
 async function remove(id: string) {
   error.textContent = "";
   try {
-    const res = await fetch(`${WEB_API}/todos/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API}/todos/${id}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`DELETE /todos/${id} failed: ${res.status}`);
     await load();
   } catch (err) {
