@@ -65,6 +65,10 @@ Resources:
           ToPort: 22
           CidrIp: !Ref SshCidr
 
+  # Private bucket. scripts/deploy-ec2.sh uploads ec2-app.tgz here and the instance pulls it.
+  AppArtifactsBucket:
+    Type: AWS::S3::Bucket
+
   WebServerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -73,6 +77,11 @@ Resources:
           - Effect: Allow
             Principal: { Service: ec2.amazonaws.com }
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Lets the X-Ray daemon send segments (xray:PutTraceSegments).
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        # Lets deploy-ec2.sh restart the app with SSM Run Command, no SSH needed.
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
       Policies:
         - PolicyName: todos-table-delete
           PolicyDocument:
@@ -80,13 +89,20 @@ Resources:
               - Effect: Allow
                 Action: dynamodb:DeleteItem
                 Resource: !GetAtt TodosTable.Arn
+        - PolicyName: read-app-artifact
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${AppArtifactsBucket.Arn}/*"
 
   WebServerProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles: [!Ref WebServerRole]
 
-  WebServerHost:
+  # UserData runs only on first boot. Rename this ID when UserData changes, to force a new instance.
+  WebServerInstance:
     Type: AWS::EC2::Instance
     Properties:
       InstanceType: t4g.nano
@@ -96,16 +112,57 @@ Resources:
       Tags:
         - { Key: Name, Value: xray-example-web }
       UserData:
-        Fn::Base64: |
+        Fn::Base64: !Sub |
           #!/bin/bash
-          # t4g.nano has 0.5 GB RAM. dnf is killed by the OOM killer without swap.
+          set -ex
+
+          # t4g.nano has 0.5 GB RAM. dnf and npm are killed by the OOM killer without swap.
           fallocate -l 1G /swapfile
           chmod 600 /swapfile
           mkswap /swapfile
           swapon /swapfile
-          dnf install -y httpd
-          echo "<h1>Hello from EC2 (Apache)</h1>" > /var/www/html/index.html
-          systemctl enable --now httpd
+
+          dnf install -y nodejs24 || dnf install -y nodejs
+
+          # Tools for logging in over SSH.
+          dnf install -y tmux
+
+          # X-Ray daemon: receives segments from the app on 127.0.0.1:2000 and sends them to X-Ray.
+          curl -o /tmp/xray.rpm https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-arm64-3.x.rpm
+          dnf install -y /tmp/xray.rpm
+          systemctl enable --now xray
+
+          # App: pulled from S3 on every start. Until deploy-ec2.sh uploads it, the service retries.
+          mkdir -p /opt/todos-ec2
+          cat > /usr/local/bin/pull-app.sh <<'EOF'
+          #!/bin/bash
+          set -e
+          aws s3 cp s3://${AppArtifactsBucket}/ec2-app.tgz /tmp/ec2-app.tgz --region ${AWS::Region}
+          tar -xzf /tmp/ec2-app.tgz -C /opt/todos-ec2
+          cd /opt/todos-ec2
+          npm install --omit=dev
+          EOF
+          chmod +x /usr/local/bin/pull-app.sh
+
+          cat > /etc/systemd/system/todos-ec2.service <<'EOF'
+          [Unit]
+          Description=Todos EC2 app
+          After=network-online.target xray.service
+
+          [Service]
+          WorkingDirectory=/opt/todos-ec2
+          Environment=TABLE_NAME=${TodosTable}
+          Environment=AWS_REGION=${AWS::Region}
+          ExecStartPre=/usr/local/bin/pull-app.sh
+          ExecStart=/usr/bin/node /opt/todos-ec2/server.js
+          Restart=always
+          RestartSec=15
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemctl daemon-reload
+          systemctl enable --now todos-ec2
 
   WebApi:
     Type: AWS::ApiGateway::RestApi
@@ -122,7 +179,7 @@ Resources:
       Integration:
         Type: HTTP_PROXY
         IntegrationHttpMethod: GET
-        Uri: !Sub "http://${WebServerHost.PublicDnsName}/"
+        Uri: !Sub "http://${WebServerInstance.PublicDnsName}/"
 
   WebTodosResource:
     Type: AWS::ApiGateway::Resource
@@ -151,13 +208,13 @@ Resources:
       Integration:
         Type: HTTP_PROXY
         IntegrationHttpMethod: ANY
-        Uri: !Sub "http://${WebServerHost.PublicDnsName}/todos/{id}"
+        Uri: !Sub "http://${WebServerInstance.PublicDnsName}/todos/{id}"
         RequestParameters:
           integration.request.path.id: method.request.path.id
 
   # A raw Deployment is not redeployed when methods change. Rename this ID
   # (V2, V3, ...) to force a new deployment.
-  WebDeploymentV2:
+  WebDeploymentV3:
     Type: AWS::ApiGateway::Deployment
     DependsOn: [WebRootMethod, WebTodoIdMethod]
     Properties:
@@ -167,7 +224,7 @@ Resources:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref WebApi
-      DeploymentId: !Ref WebDeploymentV2
+      DeploymentId: !Ref WebDeploymentV3
       StageName: Prod
       TracingEnabled: true
 
@@ -224,3 +281,9 @@ Outputs:
   TableName:
     Description: DynamoDB table name. The EC2 app reads it from TABLE_NAME.
     Value: !Ref TodosTable
+  AppArtifactsBucketName:
+    Description: Private bucket for the EC2 app tarball (used by scripts/deploy-ec2.sh)
+    Value: !Ref AppArtifactsBucket
+  WebServerInstanceId:
+    Description: EC2 instance id (used by scripts/deploy-ec2.sh)
+    Value: !Ref WebServerInstance

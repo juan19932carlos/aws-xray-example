@@ -20,7 +20,7 @@ flowchart LR
 
     subgraph "Web page"
         WebApi[API Gateway REST<br/>WebApi / Prod]
-        EC2[EC2 t4g.nano<br/>Apache]
+        EC2[EC2 t4g.nano<br/>Node app + X-Ray daemon]
     end
 
     XRay[[AWS X-Ray]]
@@ -34,6 +34,7 @@ flowchart LR
     TodosApi -.traces.-> XRay
     Lambda -.traces.-> XRay
     WebApi -.traces.-> XRay
+    EC2 -.traces via daemon.-> XRay
 ```
 
 ## Resources
@@ -44,7 +45,9 @@ flowchart LR
 | `TodosApi` | API Gateway REST API | Routes `GET` and `POST /todos` to the Lambda. Has CORS and tracing. |
 | `TodosFunction` | Lambda | One handler for `GET` and `POST /todos`. |
 | `TodosTable` | DynamoDB | Stores todos, key `id`. |
-| `WebServerHost`, `WebServerSecurityGroup` | EC2 + security group | Apache serves one landing page. Port 80 open to the world. |
+| `WebServerInstance`, `WebServerSecurityGroup` | EC2 + security group | Runs `apps/ec2` as the `todos-ec2` systemd service, with the X-Ray daemon. Port 80 open to the world, port 22 for `SshCidr`. |
+| `WebServerRole`, `WebServerProfile` | IAM role | `AWSXRayDaemonWriteAccess`, `AmazonSSMManagedInstanceCore`, `DeleteItem` on the table, `GetObject` on the artifacts bucket. |
+| `AppArtifactsBucket` | S3 bucket | Private. Holds `ec2-app.tgz`. |
 | `WebApi`, `WebRootMethod`, `WebDeployment`, `WebStage` | API Gateway REST API | Public URL for the EC2 page. Tracing on. |
 
 ## Why a second API Gateway
@@ -61,18 +64,19 @@ The alternative is one API with a `/ec2` route. It gives one URL and one node.
 ## What X-Ray shows
 
 - **Todos path:** client, `TodosApi` stage, Lambda, DynamoDB. The Lambda is instrumented with `aws-xray-sdk-core`, so DynamoDB shows as a subsegment.
-- **Web path:** client, `WebApi` stage, and an inferred EC2 node. Apache sends no traces. API Gateway records a remote subsegment for the HTTP backend, and X-Ray infers the node from it. See `journal/0002-inferred-node-discovery.md`.
+- **Web path:** client, `WebApi` stage, and the EC2 node. API Gateway records a remote subsegment for the HTTP backend, and X-Ray infers a node from it (one per URL). The app on EC2 also sends its own segment through the daemon, and DynamoDB shows as a subsegment, because the role has `AWSXRayDaemonWriteAccess`. See `journal/0002-ec2-inferred-node-and-apps-layout.md`.
 
 ## Deploying the EC2 app
 
-By hand. SAM and `pnpm deploy` do not touch the instance.
+Automatic, as the last step of `pnpm deploy` (`scripts/deploy-ec2.sh`).
 
-1. Connect: `aws ec2-instance-connect ssh --instance-id <id>` (port 22 is open for `SshCidr` only).
-2. Put `apps/ec2/package.json` and `apps/ec2/server.js` in `~/app`.
-3. Run `npm install`.
-4. Start it: `sudo TABLE_NAME=<TableName output> AWS_REGION=us-east-1 node server.js`. Port 80 needs root.
+1. The script packs `apps/ec2` (without `node_modules`) and uploads it to `AppArtifactsBucket` as `ec2-app.tgz`.
+2. It restarts the `todos-ec2` service with SSM Run Command. No SSH is needed.
+3. On every start, the service runs `/usr/local/bin/pull-app.sh`. It downloads the tarball, unpacks it to `/opt/todos-ec2`, and runs `npm install --omit=dev`.
 
-The instance has the X-Ray daemon installed by hand and an IAM role from the template. The app is not a service, so it stops when the SSH session ends.
+A new instance installs Node, the X-Ray daemon, and the service from `UserData`. Until the first upload, the service retries every 15 seconds. `UserData` runs only on first boot, so a change to it needs a new logical ID for the instance.
+
+Useful commands on the instance (`aws ec2-instance-connect ssh --instance-id <id>`): `systemctl status todos-ec2`, `journalctl -u todos-ec2`, `tail /var/log/xray/xray.log`.
 
 ## Deploy
 
