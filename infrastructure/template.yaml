@@ -2,6 +2,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: AWS X-Ray example - basic todo app
 
+Parameters:
+  SshCidr:
+    Type: String
+    Description: CIDR allowed to SSH into the web server, for example 203.0.113.5/32. Set it in samconfig.toml.
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(3[0-2]|[12]?\d)$'
+
 Globals:
   Function:
     Runtime: nodejs24.x
@@ -45,6 +51,71 @@ Resources:
             Action: s3:GetObject
             Resource: !Sub "${FrontendBucket.Arn}/*"
 
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP from anywhere for the Apache landing page, SSH from one CIDR
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidr
+
+  WebServerHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t4g.nano
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+      SecurityGroupIds: [!GetAtt WebServerSecurityGroup.GroupId]
+      Tags:
+        - { Key: Name, Value: xray-example-web }
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # t4g.nano has 0.5 GB RAM. dnf is killed by the OOM killer without swap.
+          fallocate -l 1G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          dnf install -y httpd
+          echo "<h1>Hello from EC2 (Apache)</h1>" > /var/www/html/index.html
+          systemctl enable --now httpd
+
+  WebApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: xray-example-web
+
+  WebRootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebApi
+      ResourceId: !GetAtt WebApi.RootResourceId
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: HTTP_PROXY
+        IntegrationHttpMethod: GET
+        Uri: !Sub "http://${WebServerHost.PublicDnsName}/"
+
+  WebDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: WebRootMethod
+    Properties:
+      RestApiId: !Ref WebApi
+
+  WebStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref WebApi
+      DeploymentId: !Ref WebDeployment
+      StageName: Prod
+      TracingEnabled: true
+
   TodosApi:
     Type: AWS::Serverless::Api
     Properties:
@@ -86,10 +157,12 @@ Outputs:
   ApiUrl:
     Description: API Gateway base URL (put in packages/frontend/.env as VITE_API_URL)
     Value: !Sub "https://${TodosApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
-
   FrontendBucketName:
     Description: S3 bucket that holds the built frontend
     Value: !Ref FrontendBucket
   WebsiteUrl:
     Description: Public URL of the frontend (S3 website endpoint, HTTP only)
     Value: !GetAtt FrontendBucket.WebsiteURL
+  WebUrl:
+    Description: Apache landing page on EC2, through its own API Gateway (a second URL)
+    Value: !Sub "https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
