@@ -12,6 +12,9 @@ catalogs:
     '@docusaurus/module-type-aliases':
       specifier: ^3.10.0
       version: 3.10.2
+    '@docusaurus/plugin-content-docs':
+      specifier: ^3.10.0
+      version: 3.10.2
     '@docusaurus/preset-classic':
       specifier: ^3.10.0
       version: 3.10.2
@@ -46,43 +49,6 @@ catalogs:
 importers:
 
   .: {}
-
-  apps/docs:
-    dependencies:
-      '@docusaurus/core':
-        specifier: 'catalog:'
-        version: 3.10.2(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
-      '@docusaurus/preset-classic':
-        specifier: 'catalog:'
-        version: 3.10.2(@algolia/client-search@5.60.0)(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(@types/react@19.3.0)(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(search-insights@2.17.3)(typescript@5.9.3)
-      '@docusaurus/theme-mermaid':
-        specifier: 'catalog:'
-        version: 3.10.2(@docusaurus/plugin-content-docs@3.10.2(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(@mermaid-js/layout-elk@1.0.1(mermaid@12.2.0))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
-      '@mermaid-js/layout-elk':
-        specifier: 'catalog:'
-        version: 1.0.1(mermaid@12.2.0)
-      react:
-        specifier: 'catalog:'
-        version: 19.3.1
-      react-dom:
-        specifier: 'catalog:'
-        version: 19.3.1(react@19.3.1)
-    devDependencies:
-      '@docusaurus/module-type-aliases':
-        specifier: 'catalog:'
-        version: 3.10.2(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@docusaurus/tsconfig':
-        specifier: 'catalog:'
-        version: 3.10.2
-      '@docusaurus/types':
-        specifier: 'catalog:'
-        version: 3.10.2(clean-css@5.3.3)(cssnano@6.1.2(postcss@8.5.31))(html-minifier-terser@7.2.0)(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.3.0
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
 
   apps/ec2:
     dependencies:
@@ -134,6 +100,46 @@ importers:
         version: 0.25.12
       typescript:
         specifier: ^5.6.0
+        version: 5.9.3
+
+  architecture/site:
+    dependencies:
+      '@docusaurus/core':
+        specifier: 'catalog:'
+        version: 3.10.2(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
+      '@docusaurus/plugin-content-docs':
+        specifier: 'catalog:'
+        version: 3.10.2(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
+      '@docusaurus/preset-classic':
+        specifier: 'catalog:'
+        version: 3.10.2(@algolia/client-search@5.60.0)(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(@types/react@19.3.0)(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(search-insights@2.17.3)(typescript@5.9.3)
+      '@docusaurus/theme-mermaid':
+        specifier: 'catalog:'
+        version: 3.10.2(@docusaurus/plugin-content-docs@3.10.2(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(@mdx-js/react@3.1.1(@types/react@19.3.0)(react@19.3.1))(@mermaid-js/layout-elk@1.0.1(mermaid@12.2.0))(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3)
+      '@mermaid-js/layout-elk':
+        specifier: 'catalog:'
+        version: 1.0.1(mermaid@12.2.0)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@docusaurus/module-type-aliases':
+        specifier: 'catalog:'
+        version: 3.10.2(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@docusaurus/tsconfig':
+        specifier: 'catalog:'
+        version: 3.10.2
+      '@docusaurus/types':
+        specifier: 'catalog:'
+        version: 3.10.2(clean-css@5.3.3)(cssnano@6.1.2(postcss@8.5.31))(html-minifier-terser@7.2.0)(postcss@8.5.31)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      typescript:
+        specifier: 'catalog:'
         version: 5.9.3
 
 packages:
@@ -10380,7 +10386,7 @@ snapshots:
 
   compressible@2.0.18:
     dependencies:
-      mime-db: 1.52.0
+      mime-db: 1.54.0
 
   compression@1.8.2:
     dependencies:

@@ -8,8 +8,8 @@ Todo app used to learn AWS X-Ray. pnpm monorepo, deployed with SAM (CloudFormati
 - `apps/lambda-todos/src/handler.ts` — the todos Lambda. `GET /todos` scans, `POST /todos` puts. Needs `title` in the body.
 - `apps/` — every application. Layout and dependency rules are in `.claude/rules/repo-layout.md`.
 - `apps/frontend` — Vite + vanilla TypeScript. Reads the API base URL from `VITE_API_URL`.
-- `apps/docs` — Docusaurus site (docs-only, Mermaid on). The docs plugin reads `architecture/` directly (`path: '../../architecture'`); `architecture/infrastructure.md` is excluded. Markdown is parsed with `format: 'detect'`, so `.md` is plain CommonMark.
-- `.github/workflows/docs.yml` — builds `apps/docs` and deploys it to GitHub Pages on every push to `main`. The site lives at `/aws-xray-example/` (`baseUrl`), so `trailingSlash` is `false` and assets must not use root-absolute paths.
+- `architecture/site` — Docusaurus site (Mermaid on). It lives in `architecture/` because it documents the architecture, so it is not an app. Two docs plugin instances read `architecture/decisions` and `architecture/journal`. They are the Decisions and Journal links on the right of the header. `infrastructure.md` is not shown.
+- `.github/workflows/docs.yml` — builds `architecture/site` and deploys it to GitHub Pages on every push to `main`. The site lives at `/aws-xray-example/` (`baseUrl`), so `trailingSlash` is `false` and assets must not use root-absolute paths.
 - `apps/ec2` — Node + Express app on the EC2 instance. `DELETE /todos/:id`, wrapped with the X-Ray SDK. SAM does not ship it: `scripts/deploy-ec2.sh` uploads it to the artifacts bucket and the instance pulls it (systemd service `todos-ec2`).
 
 ## Tooling
